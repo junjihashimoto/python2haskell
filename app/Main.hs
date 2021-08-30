@@ -4,10 +4,8 @@
 import Language.Python.Common
 
 import Language.Python.Version3 as V3
-import System.Exit
 import System.Environment
-import Text.Pretty.Simple (pPrint)
-import qualified Language.Haskell.TH as TH
+-- import Text.Pretty.Simple (pPrint)
 import ToHaskell
 import qualified Data.Text.IO as T
 
@@ -23,7 +21,7 @@ main = do
     (inFile:_rest) -> do
       contents <- readFile inFile
       case parseAndPretty V3.parseModule inFile contents of
-        Left error -> putStrLn $ prettyText error
+        Left error' -> putStrLn $ prettyText error'
         Right ast -> do
           -- pPrint ast
           -- pPrint decs

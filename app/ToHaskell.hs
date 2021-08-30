@@ -6,10 +6,7 @@ module ToHaskell where
 
 import Language.Python.Common
 
-import Language.Python.Version3 as V3
-import System.Exit
-import System.Environment
-import Text.Pretty.Simple (pPrint)
+
 import qualified Language.Haskell.TH as TH
 import qualified Data.Map as M
 -- import qualified GHC.Classes
@@ -40,11 +37,9 @@ getVar name = do
   v <- get
   return (M.lookup name (variables v))
 
-delVar :: String -> QN TH.Name
+delVar :: String -> QN ()
 delVar name = do
-  let n = TH.mkName name
   modify (\v -> v { variables = M.delete name (variables v) })
-  return n
 
 toHaskell' :: ModuleSpan -> IO T.Text
 toHaskell' ast = do
@@ -76,14 +71,45 @@ toHaskell (Module module') = do
     else return $ stats ++ [ TH.ValD (TH.VarP m) (TH.NormalB (TH.DoE Nothing exprs)) [] ]
 
 fromArguments :: Argument SrcSpan -> QN TH.Exp
-fromArguments (ArgExpr expr _) = fromExpression expr
+fromArguments arg =
+  case arg of
+    ArgExpr expr _ ->  fromExpression expr
+    ArgVarArgsPos _ _ ->  fail $ "fromArguments: "++ show arg ++ "is not defined "
+    ArgVarArgsKeyword _ _ ->  fail $ "fromArguments: "++ show arg ++ "is not defined "
+    ArgKeyword _ _ _ ->  fail $ "fromArguments: "++ show arg ++ "is not defined "
 
 fromExpression :: Expr SrcSpan -> QN TH.Exp
-fromExpression (Int value literal _) = do
+fromExpression v@(Imaginary _ _ _) = fail $ "fromExpression: "++ show v ++ "is not defined "
+fromExpression v@(Bool _ _) = fail $ "fromExpression: "++ show v ++ "is not defined "
+fromExpression v@(None _) = fail $ "fromExpression: "++ show v ++ "is not defined "
+fromExpression v@(Ellipsis _) = fail $ "fromExpression: "++ show v ++ "is not defined "
+fromExpression v@(ByteStrings _ _) = fail $ "fromExpression: "++ show v ++ "is not defined "
+fromExpression v@(Strings _ _) = fail $ "fromExpression: "++ show v ++ "is not defined "
+fromExpression v@(UnicodeStrings _ _) = fail $ "fromExpression: "++ show v ++ "is not defined "
+fromExpression v@(Subscript _ _ _) = fail $ "fromExpression: "++ show v ++ "is not defined "
+fromExpression v@(SlicedExpr _ _ _) = fail $ "fromExpression: "++ show v ++ "is not defined "
+fromExpression v@(CondExpr _ _ _ _) = fail $ "fromExpression: "++ show v ++ "is not defined "
+fromExpression v@(UnaryOp _ _ _) = fail $ "fromExpression: "++ show v ++ "is not defined "
+fromExpression v@(Dot _ _ _) = fail $ "fromExpression: "++ show v ++ "is not defined "
+fromExpression v@(Lambda _ _ _) = fail $ "fromExpression: "++ show v ++ "is not defined "
+fromExpression v@(Tuple _ _) = fail $ "fromExpression:" ++ show v ++ "is not defined "
+fromExpression v@(Yield _ _) = fail $ "fromExpression: "++ show v ++ "is not defined "
+fromExpression v@(Generator _ _) = fail $ "fromExpression: "++ show v ++ "is not defined "
+fromExpression v@(Await _ _) = fail $ "fromExpression: "++ show v ++ "is not defined "
+fromExpression v@(ListComp _ _) = fail $ "fromExpression: "++ show v ++ "is not defined "
+fromExpression v@(List _ _) = fail $ "fromExpression: "++ show v ++ "is not defined "
+fromExpression v@(Dictionary _ _) = fail $ "fromExpression: "++ show v ++ "is not defined "
+fromExpression v@(DictComp _ _) = fail $ "fromExpression: "++ show v ++ "is not defined "
+fromExpression v@(Set _ _) = fail $ "fromExpression: "++ show v ++ "is not defined "
+fromExpression v@(SetComp _ _) = fail $ "fromExpression: "++ show v ++ "is not defined "
+fromExpression v@(Starred _ _) = fail $ "fromExpression: "++ show v ++ "is not defined "
+fromExpression v@(Paren _ _) = fail $ "fromExpression: "++ show v ++ "is not defined "
+fromExpression v@(StringConversion _ _) = fail $ "fromExpression: "++ show v ++ "is not defined "
+fromExpression (Int value _ _) = do
   return $ TH.LitE ( TH.IntegerL value )
-fromExpression (LongInt value literal _) = do
+fromExpression (LongInt value _ _) = do
   return $ TH.LitE ( TH.IntegerL value )
-fromExpression (Float value literal _) = do
+fromExpression (Float value _ _) = do
   return $ TH.LitE ( TH.DoublePrimL (toRational value) )
 fromExpression (Var name' _) = do
   let name = ident_string name'
@@ -99,35 +125,35 @@ fromExpression (Call fn args _) = do
 fromExpression (BinaryOp v expl expr _) = do
   l <- fromExpression expl 
   r <- fromExpression expr
-  let op = case v of
-             (And _) -> '(&&)
-             (Or _) -> '(||)
-             -- (Not _) -> '(not)
-             (Exponent _) -> '(**)
-             (LessThan _) -> '(<)
-             (GreaterThan _) -> '(>)
-             (Equality _) -> '(==)
-             (GreaterThanEquals _) -> '(>=)
-             (LessThanEquals _) -> '(<=)
-             (NotEquals _) -> '(/=)
---             (NotEqualsV2 _) -> '()
---             (In _) -> '()
---             (Is _) -> '()
---             (IsNot _) -> '()
---             (NotIn _) -> '()
---             (BinaryOr _) -> '()
---             (Xor _) -> '()
---             (BinaryAnd _) -> '()
---             (ShiftLeft _) -> '()
---             (ShiftRight _) -> '()
-             (Multiply _) -> '(*)
-             (Plus _) -> '(+)
-             (Minus _) -> '(-)
-             (Divide _) -> '(/)
---             (FloorDivide _) -> '()
---             (MatrixMult _) -> '()
---             (Invert _) -> '()
---             (Modulo _) -> '(%)
+  op <- case v of
+             (And _) -> return '(&&)
+             (Or _) -> return '(||)
+             (Not _) -> fail $ show v  ++ " is not defined."
+             (Exponent _) -> return '(**)
+             (LessThan _) -> return '(<)
+             (GreaterThan _) -> return '(>)
+             (Equality _) -> return '(==)
+             (GreaterThanEquals _) -> return '(>=)
+             (LessThanEquals _) -> return '(<=)
+             (NotEquals _) -> return '(/=)
+             (NotEqualsV2 _) -> fail $ show v  ++ " is not defined."
+             (In _) -> fail $ show v  ++ " is not defined."
+             (Is _) -> fail $ show v  ++ " is not defined."
+             (IsNot _) -> fail $ show v  ++ " is not defined."
+             (NotIn _) -> fail $ show v  ++ " is not defined."
+             (BinaryOr _) -> fail $ show v  ++ " is not defined."
+             (Xor _) -> fail $ show v  ++ " is not defined."
+             (BinaryAnd _) -> fail $ show v  ++ " is not defined."
+             (ShiftLeft _) -> fail $ show v  ++ " is not defined."
+             (ShiftRight _) -> fail $ show v  ++ " is not defined."
+             (Multiply _) -> return '(*)
+             (Plus _) -> return '(+)
+             (Minus _) -> return '(-)
+             (Divide _) -> return '(/)
+             (FloorDivide _) -> fail $ show v  ++ " is not defined."
+             (MatrixMult _) -> fail $ show v  ++ " is not defined."
+             (Invert _) -> fail $ show v  ++ " is not defined."
+             (Modulo _) -> fail $ show v  ++ " is not defined."
   return $ TH.InfixE ( Just l)  ( TH.VarE op ) ( Just r )
 
 -- fromCondition :: (Expr SrcSpan, Suite SrcSpan) -> a -> QN TH.Exp
@@ -138,19 +164,54 @@ fromExpression (BinaryOp v expl expr _) = do
 
 
 fromConditions :: [(Expr SrcSpan, Suite SrcSpan)] -> Suite SrcSpan -> QN TH.Exp
-fromConditions ((cond, ret):conds) final_ret = do
+fromConditions ((cond, ret:_):conds) final_ret = do
   cond' <- fromExpression cond
   ret' <- fromBody ret
   v <- fromConditions conds final_ret
   return $ TH.CondE cond' ret' v
-fromConditions [] ret'' = do
+fromConditions [] (ret'':_) = do
   fromBody ret''
+fromConditions a v = fail $ "fromBody: condition=" ++ show a ++ " return=" ++ show v ++ " is not defined."
   
-fromBody :: [Statement SrcSpan] -> QN TH.Exp
-fromBody [Return (Just ret) _]  = do
+fromBody :: Statement SrcSpan -> QN TH.Exp
+fromBody (Return (Just ret) _)  = do
   fromExpression ret
-fromBody [Conditional conds else' _]  = do
+fromBody (Conditional conds else' _)  = do
   fromConditions conds else'
+fromBody v@(Import _ _) = fail $ "fromBody:" ++ show v ++ "is not defined."
+fromBody v@(FromImport _ _ _) = fail $ "fromBody:" ++ show v ++ "is not defined."
+fromBody v@(While _ _ _ _) = fail $ "fromBody:" ++ show v ++ "is not defined."
+fromBody v@(For _ _ _ _ _) = fail $ "fromBody:" ++ show v ++ "is not defined."
+fromBody v@(AsyncFor _ _) = fail $ "fromBody:" ++ show v ++ "is not defined."
+fromBody v@(Fun _ _ _ _ _) = fail $ "fromBody:" ++ show v ++ "is not defined."
+fromBody v@(AsyncFun _ _) = fail $ "fromBody:" ++ show v ++ "is not defined."
+fromBody v@(Class _ _ _ _) = fail $ "fromBody:" ++ show v ++ "is not defined."
+fromBody v@(Assign _ _ _) = fail $ "fromBody:" ++ show v ++ "is not defined."
+fromBody v@(AugmentedAssign _ _ _ _) = fail $ "fromBody:" ++ show v ++ "is not defined."
+fromBody v@(AnnotatedAssign _ _ _ _) = fail $ "fromBody:" ++ show v ++ "is not defined."
+fromBody v@(Decorated _ _ _) = fail $ "fromBody:" ++ show v ++ "is not defined."
+fromBody v@(Try _ _ _ _ _) = fail $ "fromBody:" ++ show v ++ "is not defined."
+fromBody v@(Raise _ _) = fail $ "fromBody:" ++ show v ++ "is not defined."
+fromBody v@(With _ _ _) = fail $ "fromBody:" ++ show v ++ "is not defined."
+fromBody v@(AsyncWith _ _) = fail $ "fromBody:" ++ show v ++ "is not defined."
+fromBody v@(Pass _) = fail $ "fromBody:" ++ show v ++ "is not defined."
+fromBody v@(Break _) = fail $ "fromBody:" ++ show v ++ "is not defined."
+fromBody v@(Continue _) = fail $ "fromBody:" ++ show v ++ "is not defined."
+fromBody v@(Delete _ _) = fail $ "fromBody:" ++ show v ++ "is not defined."
+fromBody v@(StmtExpr _ _) = fail $ "fromBody:" ++ show v ++ "is not defined."
+fromBody v@(Global _ _) = fail $ "fromBody:" ++ show v ++ "is not defined."
+fromBody v@(NonLocal _ _) = fail $ "fromBody:" ++ show v ++ "is not defined."
+fromBody v@(Assert _ _) = fail $ "fromBody:" ++ show v ++ "is not defined."
+fromBody v@(Print _ _ _ _) = fail $ "fromBody:" ++ show v ++ "is not defined."
+fromBody v@(Exec _ _ _) = fail $ "fromBody:" ++ show v ++ "is not defined."
+fromBody v@(Return Nothing (SpanCoLinear _ _ _ _)) = fail $ "fromBody:" ++ show v ++ "is not defined."
+fromBody v@(Return Nothing (SpanMultiLine _ _ _ _ _)) = fail $ "fromBody:" ++ show v ++ "is not defined."
+fromBody v@(Return Nothing (SpanPoint _ _ _)) = fail $ "fromBody:" ++ show v ++ "is not defined."
+fromBody v@(Return Nothing SpanEmpty) = fail $ "fromBody:" ++ show v ++ "is not defined."
+
+
+fromBodys :: [Statement SrcSpan] -> QN [TH.Exp]
+fromBodys = mapM fromBody
 
 withName :: String -> (TH.Name -> QN a) -> QN a
 withName name fn= do
@@ -174,11 +235,9 @@ withParams args fn = do
   return v
 
 fromStatement :: Statement SrcSpan -> QN (Maybe TH.Dec)
-fromStatement (Fun name args result_annot body _) = do
+fromStatement (Fun name args ___ (body:_) _) = do
   let str = ident_string name
   n <- addVar str
-  
---  withName (ident_string name) $ \n -> do
   withParams args $ \params -> do
     expression <- fromBody body
     return $ Just $ TH.FunD n [ TH.Clause params (TH.NormalB expression) [] ]
@@ -186,6 +245,14 @@ fromStatement (StmtExpr sts _) = do
   s <- fromExpression sts
   addExpr s
   return Nothing
+
+fromStatement (Assign variables' value _) = do
+  case variables' of
+    (Var name _) : [] -> do
+      n <- addVar (ident_string name)
+      expression <- fromExpression value
+      return $ Just $ TH.ValD (TH.VarP n) (TH.NormalB expression) []
+    _ -> fail $ "fromStatement:" ++ show variables' ++ "is not defined."
 
 fromStatement a = do
   fail $ "Error:" ++ show a
