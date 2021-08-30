@@ -80,7 +80,10 @@ fromArguments arg =
 
 fromExpression :: Expr SrcSpan -> QN TH.Exp
 fromExpression v@(Imaginary _ _ _) = fail $ "fromExpression: "++ show v ++ "is not defined "
-fromExpression v@(Bool _ _) = fail $ "fromExpression: "++ show v ++ "is not defined "
+fromExpression (Bool True _) = do
+  return $ TH.ConE 'True
+fromExpression (Bool False _) = do
+  return $ TH.ConE 'False
 fromExpression v@(None _) = fail $ "fromExpression: "++ show v ++ "is not defined "
 fromExpression v@(Ellipsis _) = fail $ "fromExpression: "++ show v ++ "is not defined "
 fromExpression v@(ByteStrings _ _) = fail $ "fromExpression: "++ show v ++ "is not defined "
