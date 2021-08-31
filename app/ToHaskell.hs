@@ -1,3 +1,7 @@
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE KindSignatures #-}
+{-# LANGUAGE GADTs #-}
+{-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE QuasiQuotes #-}
@@ -11,8 +15,9 @@ import qualified Language.Haskell.TH as TH
 import qualified Data.Map as M
 -- import qualified GHC.Classes
 import Control.Monad.Trans.State.Strict
-import Data.Maybe (catMaybes)
 import qualified Data.Text as T
+-- import qualified GHC.Types
+import Data.Maybe (isJust, fromJust)
 
 data ModuleData =
   ModuleData
@@ -49,6 +54,7 @@ toHaskell' ast = do
   return $
     T.replace "GHC.Num." "" $
     T.replace "GHC.Classes." "" $
+    T.replace "GHC.Types." "" $
     T.replace "System.IO." "" txt
 
 
@@ -63,7 +69,7 @@ toHaskell (Module module') = do
         }
   (stats,stat') <- flip runStateT stat $ do
     v <- mapM fromStatement module'
-    return $ catMaybes v
+    return $ concat v
   let m = TH.mkName "main"
       exprs = map TH.NoBindS (statements stat')
   if length exprs == 0
@@ -237,24 +243,47 @@ withParams args fn = do
   mapM_ delVar names
   return v
 
-fromStatement :: Statement SrcSpan -> QN (Maybe TH.Dec)
-fromStatement (Fun name args ___ (body:_) _) = do
+type2type :: Expr SrcSpan -> QN TH.Name
+type2type (Var (Ident "int" _) _) = return ''Int
+type2type (Var (Ident "str" _) _) = return ''String
+type2type (Var (Ident "float" _) _) = return ''Double
+type2type v = fail $ "type2type: " ++ show v ++ " is not defined."
+
+types2types :: [Expr SrcSpan] -> QN [TH.Name]
+types2types = mapM type2type
+
+fromStatement :: Statement SrcSpan -> QN [TH.Dec]
+fromStatement (Fun name args rettype (body:_) _) = do
   let str = ident_string name
+      pretypes = map param_py_annotation args
   n <- addVar str
-  withParams args $ \params -> do
-    expression <- fromBody body
-    return $ Just $ TH.FunD n [ TH.Clause params (TH.NormalB expression) [] ]
+  if all isJust (pretypes ++ [rettype]) == True
+    then do
+      types <- types2types (map fromJust pretypes)
+      rtype <- type2type (fromJust rettype)
+      let arrow a b = (TH.AppT (TH.AppT TH.ArrowT a) b)
+      withParams args $ \params -> do
+        expression <- fromBody body
+        return $
+          [ TH.SigD n (foldr arrow (TH.ConT rtype) (map TH.ConT types))
+          , TH.FunD n [ TH.Clause params (TH.NormalB expression) [] ]
+          ]
+    else do
+      withParams args $ \params -> do
+        expression <- fromBody body
+        return $ [TH.FunD n [ TH.Clause params (TH.NormalB expression) [] ]]
+
 fromStatement (StmtExpr sts _) = do
   s <- fromExpression sts
   addExpr s
-  return Nothing
+  return []
 
 fromStatement (Assign variables' value _) = do
   case variables' of
     (Var name _) : [] -> do
       n <- addVar (ident_string name)
       expression <- fromExpression value
-      return $ Just $ TH.ValD (TH.VarP n) (TH.NormalB expression) []
+      return $ [TH.ValD (TH.VarP n) (TH.NormalB expression) []]
     _ -> fail $ "fromStatement:" ++ show variables' ++ "is not defined."
 
 fromStatement a = do
