@@ -112,7 +112,7 @@ fromExpression v@(DictComp _ _) = fail $ "fromExpression: "++ show v ++ "is not 
 fromExpression v@(Set _ _) = fail $ "fromExpression: "++ show v ++ "is not defined "
 fromExpression v@(SetComp _ _) = fail $ "fromExpression: "++ show v ++ "is not defined "
 fromExpression v@(Starred _ _) = fail $ "fromExpression: "++ show v ++ "is not defined "
-fromExpression v@(Paren _ _) = fail $ "fromExpression: "++ show v ++ "is not defined "
+fromExpression (Paren expr _) = fromExpression expr
 fromExpression v@(StringConversion _ _) = fail $ "fromExpression: "++ show v ++ "is not defined "
 fromExpression (Int value _ _) = do
   return $ TH.LitE ( TH.IntegerL value )

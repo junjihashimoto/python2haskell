@@ -1,3 +1,9 @@
+def addf(a:float, b:float) -> float:
+    return (a + b)
+
+def add(a:int, b:int) -> int:
+    return (a + b)
+
 def fib(n:int) -> int:
     if n == 0:
         return 0
