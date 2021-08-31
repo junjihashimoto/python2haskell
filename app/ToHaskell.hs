@@ -56,10 +56,12 @@ toHaskell' ast = do
   let txt = T.pack str_ast
   return $
     T.replace "GHC.Num." "" $
-      T.replace "GHC.Classes." "" $
-        T.replace "GHC.Types." "" $
-          T.replace "GHC.Show." "" $
-            T.replace "System.IO." "" txt
+    T.replace "GHC.Classes." "" $
+    T.replace "GHC.Types." "" $
+    T.replace "GHC.Maybe." "" $
+    T.replace "GHC.Real." "" $
+    T.replace "GHC.Show." "" $
+    T.replace "System.IO." "" txt
 
 toHaskell :: ModuleSpan -> TH.Q [TH.Dec]
 toHaskell (Module module') = do
@@ -102,8 +104,14 @@ fromExpression v@(UnicodeStrings _ _) = fail $ "fromExpression: " ++ show' v ++ 
 fromExpression v@(Subscript _ _ _) = fail $ "fromExpression: " ++ show' v ++ "is not defined "
 fromExpression v@(SlicedExpr _ _ _) = fail $ "fromExpression: " ++ show' v ++ "is not defined "
 fromExpression v@(CondExpr _ _ _ _) = fail $ "fromExpression: " ++ show' v ++ "is not defined "
+fromExpression (UnaryOp (Minus _) v _) = TH.AppE (TH.VarE 'negate) <$> fromExpression v
 fromExpression v@(UnaryOp _ _ _) = fail $ "fromExpression: " ++ show' v ++ "is not defined "
-fromExpression v@(Dot _ _ _) = fail $ "fromExpression: " ++ show' v ++ "is not defined "
+fromExpression v@(Dot v' fn _) = do
+  fn' <- getVar (ident_string fn)
+  case fn' of
+    Just fn'' -> do
+      TH.AppE <$> (return (TH.VarE fn'')) <*> fromExpression v'
+    Nothing -> fail $ "fromExpression: " ++ show' v ++ "is not defined "
 fromExpression v@(Lambda _ _ _) = fail $ "fromExpression: " ++ show' v ++ "is not defined "
 fromExpression v@(Tuple _ _) = fail $ "fromExpression:" ++ show' v ++ "is not defined "
 fromExpression v@(Yield _ _) = fail $ "fromExpression: " ++ show' v ++ "is not defined "
@@ -243,13 +251,22 @@ withParams args fn = do
   mapM_ delVar names
   return v
 
-type2type :: Expr SrcSpan -> QN TH.Name
-type2type (Var (Ident "int" _) _) = return ''Int
-type2type (Var (Ident "str" _) _) = return ''String
-type2type (Var (Ident "float" _) _) = return ''Double
+type2type :: Expr SrcSpan -> QN TH.Type
+type2type (Var (Ident "int" _) _) = return $ TH.ConT ''Int
+type2type (Var (Ident "str" _) _) = return $ TH.ConT ''String
+type2type (Var (Ident "float" _) _) = return $ TH.ConT ''Double
+type2type (Var (Ident "bool" _) _) = return $ TH.ConT ''Bool
+type2type (Var (Ident "Optional" _) _) = return $ TH.ConT ''Maybe
+type2type (Var (Ident "List" _) _) = return TH.ListT
+type2type a@(Var (Ident v _) _) = do
+  vv <- getVar v
+  case vv of
+    Just v' -> return $ TH.ConT v'
+    Nothing -> fail $ "type2type: " ++ show' a ++ " is not defined."
+type2type (Subscript var0 var1 _) = TH.AppT <$> type2type var0 <*> type2type var1
 type2type v = fail $ "type2type: " ++ show' v ++ " is not defined."
 
-types2types :: [Expr SrcSpan] -> QN [TH.Name]
+types2types :: [Expr SrcSpan] -> QN [TH.Type]
 types2types = mapM type2type
 
 fromStatement :: Statement SrcSpan -> QN [TH.Dec]
@@ -265,7 +282,7 @@ fromStatement (Fun name args rettype (body : _) _) = do
       withParams args $ \params -> do
         expression <- fromBody body
         return
-          [ TH.SigD n (foldr arrow (TH.ConT rtype) (map TH.ConT types)),
+          [ TH.SigD n (foldr arrow rtype types),
             TH.FunD n [TH.Clause params (TH.NormalB expression) []]
           ]
     else do
@@ -291,7 +308,7 @@ fromStatement (Class name _ body _) = do
   vars' <- forM (filterAnn body) $ \(type', name') -> do
     n <- addVar (ident_string name')
     t <- type2type type'
-    return (n, TH.Bang TH.NoSourceUnpackedness TH.NoSourceStrictness, TH.ConT t)
+    return (n, TH.Bang TH.NoSourceUnpackedness TH.NoSourceStrictness, t)
   return
     [ TH.DataD
         []
