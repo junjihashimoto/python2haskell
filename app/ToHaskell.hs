@@ -12,6 +12,7 @@ module ToHaskell where
 
 import Control.Monad (forM)
 import Control.Monad.Trans.State.Strict
+-- import Control.Monad.IO.Class (liftIO)
 import qualified Data.Map as M
 -- import qualified GHC.Types
 import Data.Maybe (fromJust, isJust)
@@ -20,6 +21,7 @@ import qualified Data.Text.Lazy as TL
 import qualified Language.Haskell.TH as TH
 import Language.Python.Common
 import Text.Pretty.Simple (pShow)
+-- import Text.Pretty.Simple (pPrint)
 
 show' :: Show a => a -> String
 show' = T.unpack . TL.toStrict . pShow
@@ -52,6 +54,7 @@ delVar name = do
 toHaskell' :: ModuleSpan -> IO T.Text
 toHaskell' ast = do
   decs <- TH.runQ (toHaskell ast) :: IO [TH.Dec]
+--  pPrint decs
   TH.LitE (TH.StringL str_ast) <- TH.stringE (TH.pprint decs)
   let txt = T.pack str_ast
   return $
@@ -96,29 +99,38 @@ fromExpression (Bool True _) = do
   return $ TH.ConE 'True
 fromExpression (Bool False _) = do
   return $ TH.ConE 'False
-fromExpression v@(None _) = fail $ "fromExpression: " ++ show' v ++ "is not defined "
+fromExpression (None _) = do
+  return $ TH.ConE '()
 fromExpression v@(Ellipsis _) = fail $ "fromExpression: " ++ show' v ++ "is not defined "
 fromExpression v@(ByteStrings _ _) = fail $ "fromExpression: " ++ show' v ++ "is not defined "
-fromExpression v@(Strings _ _) = fail $ "fromExpression: " ++ show' v ++ "is not defined "
+fromExpression (Strings v _) = do
+  return $ TH.LitE (TH.StringL (concat v))
 fromExpression v@(UnicodeStrings _ _) = fail $ "fromExpression: " ++ show' v ++ "is not defined "
 fromExpression v@(Subscript _ _ _) = fail $ "fromExpression: " ++ show' v ++ "is not defined "
 fromExpression v@(SlicedExpr _ _ _) = fail $ "fromExpression: " ++ show' v ++ "is not defined "
 fromExpression v@(CondExpr _ _ _ _) = fail $ "fromExpression: " ++ show' v ++ "is not defined "
 fromExpression (UnaryOp (Minus _) v _) = TH.AppE (TH.VarE 'negate) <$> fromExpression v
 fromExpression v@(UnaryOp _ _ _) = fail $ "fromExpression: " ++ show' v ++ "is not defined "
-fromExpression v@(Dot v' fn _) = do
+fromExpression (Dot v' fn _) = do
   fn' <- getVar (ident_string fn)
   case fn' of
     Just fn'' -> do
       TH.AppE <$> (return (TH.VarE fn'')) <*> fromExpression v'
-    Nothing -> fail $ "fromExpression: " ++ show' v ++ "is not defined "
+    Nothing -> do
+      n' <- addVar (ident_string fn)
+      TH.AppE <$> (return (TH.VarE n')) <*> fromExpression v'
+      -- fail $ "fromExpression: " ++ show' v ++ "is not defined "
 fromExpression v@(Lambda _ _ _) = fail $ "fromExpression: " ++ show' v ++ "is not defined "
-fromExpression v@(Tuple _ _) = fail $ "fromExpression:" ++ show' v ++ "is not defined "
+fromExpression (Tuple exprs _) = do
+  exprs' <- mapM fromExpression exprs
+  return $ TH.TupE (map Just exprs')
 fromExpression v@(Yield _ _) = fail $ "fromExpression: " ++ show' v ++ "is not defined "
 fromExpression v@(Generator _ _) = fail $ "fromExpression: " ++ show' v ++ "is not defined "
 fromExpression v@(Await _ _) = fail $ "fromExpression: " ++ show' v ++ "is not defined "
 fromExpression v@(ListComp _ _) = fail $ "fromExpression: " ++ show' v ++ "is not defined "
-fromExpression v@(List _ _) = fail $ "fromExpression: " ++ show' v ++ "is not defined "
+fromExpression (List exprs _) = do
+  exprs' <- mapM fromExpression exprs
+  return $ TH.ListE exprs'
 fromExpression v@(Dictionary _ _) = fail $ "fromExpression: " ++ show' v ++ "is not defined "
 fromExpression v@(DictComp _ _) = fail $ "fromExpression: " ++ show' v ++ "is not defined "
 fromExpression v@(Set _ _) = fail $ "fromExpression: " ++ show' v ++ "is not defined "
@@ -137,7 +149,10 @@ fromExpression (Var name' _) = do
   n <- getVar name
   case n of
     Just n' -> return $ TH.VarE n'
-    Nothing -> fail $ "Cannot find '" ++ name ++ "'."
+    Nothing -> do
+      --fail $ "Cannot find '" ++ name ++ "'."
+      n' <- addVar name
+      return $ TH.VarE n'
 fromExpression (Call fn args _) = do
   fn' <- fromExpression fn
   args' <- mapM fromArguments args
@@ -183,20 +198,24 @@ fromExpression (BinaryOp v expl expr _) = do
 --   return $ TH.CondE cond' ret'
 
 fromConditions :: [(Expr SrcSpan, Suite SrcSpan)] -> Suite SrcSpan -> QN TH.Exp
-fromConditions ((cond, ret : _) : conds) final_ret = do
+fromConditions ((cond, ret) : conds) final_ret = do
   cond' <- fromExpression cond
-  ret' <- fromBody ret
+  ret' <- fromBodies ret
   v <- fromConditions conds final_ret
   return $ TH.CondE cond' ret' v
-fromConditions [] (ret'' : _) = do
-  fromBody ret''
-fromConditions a v = fail $ "fromBody: condition=" ++ show' a ++ " return=" ++ show' v ++ " is not defined."
+fromConditions [] ret'' = do
+  fromBodies ret''
+-- fromConditions a v = fail $ "fromBody: condition=" ++ show' a ++ " return=" ++ show' v ++ " is not defined."
 
-fromBody :: Statement SrcSpan -> QN TH.Exp
+data Body
+  = Ret TH.Exp
+  | Let (TH.Exp->TH.Exp)
+
+fromBody :: Statement SrcSpan -> QN Body
 fromBody (Return (Just ret) _) = do
-  fromExpression ret
+  Ret <$> fromExpression ret
 fromBody (Conditional conds else' _) = do
-  fromConditions conds else'
+  Ret <$> fromConditions conds else'
 fromBody v@(Import _ _) = fail $ "fromBody:" ++ show' v ++ "is not defined."
 fromBody v@(FromImport _ _ _) = fail $ "fromBody:" ++ show' v ++ "is not defined."
 fromBody v@(While _ _ _ _) = fail $ "fromBody:" ++ show' v ++ "is not defined."
@@ -205,7 +224,19 @@ fromBody v@(AsyncFor _ _) = fail $ "fromBody:" ++ show' v ++ "is not defined."
 fromBody v@(Fun _ _ _ _ _) = fail $ "fromBody:" ++ show' v ++ "is not defined."
 fromBody v@(AsyncFun _ _) = fail $ "fromBody:" ++ show' v ++ "is not defined."
 fromBody v@(Class _ _ _ _) = fail $ "fromBody:" ++ show' v ++ "is not defined."
-fromBody v@(Assign _ _ _) = fail $ "fromBody:" ++ show' v ++ "is not defined."
+fromBody (Assign variables' value _) = do
+  case variables' of
+    (Var name _) : [] -> do
+      n <- addVar (ident_string name)
+      expression <- fromExpression value
+      return $ Let $ \expr -> TH.LetE [TH.ValD (TH.VarP n) (TH.NormalB expression) []] expr
+    (Tuple exprs _) : [] -> do
+      vars <- forM exprs $ \(Var name _) -> do
+        n <- addVar (ident_string name)
+        return $ TH.VarP n
+      expression <- fromExpression value
+      return $ Let $ \expr -> TH.LetE [TH.ValD (TH.TupP vars) (TH.NormalB expression) []] expr
+    _ -> fail $ "fromBody:" ++ show' variables' ++ "is not defined."
 fromBody v@(AugmentedAssign _ _ _ _) = fail $ "fromBody:" ++ show' v ++ "is not defined."
 fromBody v@(AnnotatedAssign _ _ _ _) = fail $ "fromBody:" ++ show' v ++ "is not defined."
 fromBody v@(Decorated _ _ _) = fail $ "fromBody:" ++ show' v ++ "is not defined."
@@ -228,8 +259,16 @@ fromBody v@(Return Nothing (SpanMultiLine _ _ _ _ _)) = fail $ "fromBody:" ++ sh
 fromBody v@(Return Nothing (SpanPoint _ _ _)) = fail $ "fromBody:" ++ show' v ++ "is not defined."
 fromBody v@(Return Nothing SpanEmpty) = fail $ "fromBody:" ++ show' v ++ "is not defined."
 
-fromBodys :: [Statement SrcSpan] -> QN [TH.Exp]
-fromBodys = mapM fromBody
+fromBodies :: [Statement SrcSpan] -> QN TH.Exp
+fromBodies bodies = mapM fromBody bodies >>= bodies2body 
+
+bodies2body :: [Body] -> QN TH.Exp
+bodies2body [] = return $ TH.ConE '()
+bodies2body ((Let fn):other) = do
+  vv <- bodies2body other
+  return $ fn vv
+bodies2body ((Ret v):_) = return v
+  
 
 withName :: String -> (TH.Name -> QN a) -> QN a
 withName name fn = do
@@ -258,19 +297,42 @@ type2type (Var (Ident "float" _) _) = return $ TH.ConT ''Double
 type2type (Var (Ident "bool" _) _) = return $ TH.ConT ''Bool
 type2type (Var (Ident "Optional" _) _) = return $ TH.ConT ''Maybe
 type2type (Var (Ident "List" _) _) = return TH.ListT
-type2type a@(Var (Ident v _) _) = do
+-- type2type (Var (Ident "Tuple" _) _) = return TH.TupleT
+type2type (Tuple exprs _) = do
+  let len = length exprs
+  exprs' <- mapM type2type exprs
+  return $ foldl TH.AppT (TH.TupleT len) exprs'
+type2type (Var (Ident v _) _) = do
   vv <- getVar v
   case vv of
     Just v' -> return $ TH.ConT v'
-    Nothing -> fail $ "type2type: " ++ show' a ++ " is not defined."
+    Nothing -> do
+      -- Should output a warning of a isolated type
+      n <- addVar v
+      return $ TH.ConT n
+type2type (Subscript (Var (Ident "Tuple" _) _) v@(Tuple _ _) _) = do
+  type2type v
 type2type (Subscript var0 var1 _) = TH.AppT <$> type2type var0 <*> type2type var1
+type2type v@(Dot _ _ _) = do
+  let loop :: Expr SrcSpan -> String
+      loop (Var ident _) = ident_string ident
+      loop (Dot v0 v1 _) = loop v0 ++ "." ++ ident_string v1
+      loop _ = ""
+      str = loop v
+  vv <- getVar str
+  case vv of
+    Just v' -> return $ TH.ConT v'
+    Nothing -> do
+      -- Should output a warning of a isolated type
+      n <- addVar str
+      return $ TH.ConT n
 type2type v = fail $ "type2type: " ++ show' v ++ " is not defined."
 
 types2types :: [Expr SrcSpan] -> QN [TH.Type]
 types2types = mapM type2type
 
 fromStatement :: Statement SrcSpan -> QN [TH.Dec]
-fromStatement (Fun name args rettype (body : _) _) = do
+fromStatement (Fun name args rettype bodies _) = do
   let str = ident_string name
       pretypes = map param_py_annotation args
   n <- addVar str
@@ -280,14 +342,14 @@ fromStatement (Fun name args rettype (body : _) _) = do
       rtype <- type2type (fromJust rettype)
       let arrow a b = TH.AppT (TH.AppT TH.ArrowT a) b
       withParams args $ \params -> do
-        expression <- fromBody body
+        expression <- fromBodies bodies
         return
           [ TH.SigD n (foldr arrow rtype types),
             TH.FunD n [TH.Clause params (TH.NormalB expression) []]
           ]
     else do
       withParams args $ \params -> do
-        expression <- fromBody body
+        expression <- fromBodies bodies
         return [TH.FunD n [TH.Clause params (TH.NormalB expression) []]]
 fromStatement (StmtExpr sts _) = do
   s <- fromExpression sts
@@ -299,6 +361,12 @@ fromStatement (Assign variables' value _) = do
       n <- addVar (ident_string name)
       expression <- fromExpression value
       return [TH.ValD (TH.VarP n) (TH.NormalB expression) []]
+    (Tuple exprs _) : [] -> do
+      vars <- forM exprs $ \(Var name _) -> do
+        n <- addVar (ident_string name)
+        return $ TH.VarP n
+      expression <- fromExpression value
+      return [TH.ValD (TH.TupP vars) (TH.NormalB expression) []]
     _ -> fail $ "fromStatement:" ++ show' variables' ++ "is not defined."
 fromStatement (Class name _ body _) = do
   class_name' <- addVar (ident_string name)
@@ -309,15 +377,21 @@ fromStatement (Class name _ body _) = do
     n <- addVar (ident_string name')
     t <- type2type type'
     return (n, TH.Bang TH.NoSourceUnpackedness TH.NoSourceStrictness, t)
-  return
-    [ TH.DataD
-        []
-        class_name'
-        []
-        Nothing
-        [TH.RecC class_name' vars']
-        [ TH.DerivClause Nothing [TH.ConT ''Show, TH.ConT ''Eq]
-        ]
-    ]
+  let dat = [ TH.DataD
+              []
+              class_name'
+              []
+              Nothing
+              [TH.RecC class_name' vars']
+              [ TH.DerivClause Nothing [TH.ConT ''Show, TH.ConT ''Eq]
+              ]
+            ]
+  let filterFun [] = []
+      filterFun (f@(Fun _ _  _ _ _) : other) = f : filterFun other
+      filterFun (_ : other) = filterFun other
+--   liftIO $ print $ filterFun body
+  funcs <- mapM fromStatement $ filterFun body
+  return $ dat ++ concat funcs
+
 fromStatement a = do
   fail $ "Error:" ++ show' a

@@ -1,13 +1,12 @@
 {-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE TemplateHaskell #-}
 
--- import Text.Pretty.Simple (pPrint)
-
 import qualified Data.Text.IO as T
 import Language.Python.Common
 import Language.Python.Version3 as V3
 import System.Environment
 import ToHaskell
+-- import Text.Pretty.Simple (pPrint)
 
 data PythonVersion = Two | Three
   deriving (Eq, Show)
@@ -23,10 +22,9 @@ main = do
       case parseAndPretty V3.parseModule inFile contents of
         Left error' -> putStrLn $ prettyText error'
         Right ast -> do
-          -- pPrint ast
-          -- pPrint decs
+--           pPrint ast
           toHaskell' ast >>= T.putStrLn
-    -- putStrLn $ prettyText ast
+          -- putStrLn $ prettyText ast
     _other -> putStrLn "Incorrect command line. Expected: inputFileName"
 
 parseAndPretty :: Parser -> FilePath -> String -> Either ParseError ModuleSpan
