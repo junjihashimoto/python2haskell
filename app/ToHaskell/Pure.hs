@@ -6,7 +6,7 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TypeFamilies #-}
 
-module ToHaskell where
+module ToHaskell.Pure where
 
 -- import qualified GHC.Classes
 

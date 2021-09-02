@@ -5,7 +5,7 @@ import qualified Data.Text.IO as T
 import Language.Python.Common
 import Language.Python.Version3 as V3
 import System.Environment
-import ToHaskell
+import ToHaskell.Pure
 -- import Text.Pretty.Simple (pPrint)
 
 data PythonVersion = Two | Three

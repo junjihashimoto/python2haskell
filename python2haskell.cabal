@@ -24,7 +24,7 @@ executable python2haskell
     main-is:          Main.hs
 
     -- Modules included in this executable, other than Main.
-    other-modules:    ToHaskell
+    other-modules:    ToHaskell.Pure
 
     -- LANGUAGE extensions used by modules in this package.
     -- other-extensions:
